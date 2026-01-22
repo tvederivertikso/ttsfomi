@@ -1,7 +1,7 @@
 ﻿class SocketEdgeTTS {
 	constructor(_indexpart, _filename, _filenum,
 				_voice, _pitch, _rate, _volume, _text,
-				_statArea, _obj_threads_info, _save_to_var) {
+				_statArea, _obj_threads_info, _save_to_var, _dont_start_immediately = false) { // Добавлен новый параметр
 		this.bytes_data_separator = new TextEncoder().encode("Path:audio\r\n")
 		this.data_separator = new Uint8Array(this.bytes_data_separator)
 		
@@ -24,12 +24,13 @@
 		this.end_message_received = false
 		this.start_save = false	
 		
-		//Start
-		this.start_works()
+		// ИСПРАВЛЕНИЕ: Запускаем только если это не запрещено
+		if (!_dont_start_immediately) {
+			this.start_works()
+		}
 	}
 
 	clear() {
-		//this.socket = null;	
 		this.end_message_received = false	
 		this.my_uint8Array = null
 		this.my_uint8Array = new Uint8Array(0)
@@ -56,49 +57,53 @@
 		return dateString.replace(/\u200E/g, '') + ' GMT+0000 (Coordinated Universal Time)'
 	}	
 
+    // ИСПРАВЛЕНИЕ: Добавлена задержка для стабильности
 	onSocketOpen(event) {
-		this.end_message_received = false
-		this.update_stat("Запущена")
-		
-		var my_data = this.date_to_string()
-		this.socket.send(
-			"X-Timestamp:" + my_data + "\r\n" +
-			"Content-Type:application/json; charset=utf-8\r\n" +
-			"Path:speech.config\r\n\r\n" +
-			'{"context":{"synthesis":{"audio":{"metadataoptions":{' +
-			'"sentenceBoundaryEnabled":false,"wordBoundaryEnabled":true},' +
-			'"outputFormat":"audio-24khz-96kbitrate-mono-mp3"' +
-			"}}}}\r\n"
-		)
-			
-		this.socket.send(
-			this.ssml_headers_plus_data(
-				this.connect_id(),
-				my_data,
-				this.mkssml()
-			)
-		)
-	}
+        this.end_message_received = false;
+        this.update_stat("Запущена");
+
+        setTimeout(() => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                var my_data = this.date_to_string();
+                this.socket.send(
+                    "X-Timestamp:" + my_data + "\r\n" +
+                    "Content-Type:application/json; charset=utf-8\r\n" +
+                    "Path:speech.config\r\n\r\n" +
+                    '{"context":{"synthesis":{"audio":{"metadataoptions":{' +
+                    '"sentenceBoundaryEnabled":false,"wordBoundaryEnabled":true},' +
+                    '"outputFormat":"audio-24khz-96kbitrate-mono-mp3"' +
+                    "}}}}\r\n"
+                );
+                    
+                this.socket.send(
+                    this.ssml_headers_plus_data(
+                        this.connect_id(),
+                        my_data,
+                        this.mkssml()
+                    )
+                );
+            } else {
+                if (this.errorCallback) {
+                    this.errorCallback(new Error(`Socket for part ${this.indexpart} closed before it could send data.`));
+                }
+            }
+        }, 50); // Небольшая задержка для стабильности
+    }
 		
 	async onSocketMessage(event) {
 		const data = await event.data
 		if ( typeof data == "string" ) {
 			if (data.includes("Path:turn.end")) {
 				this.end_message_received = true
-				//console.log("Path:turn.end ", this.indexpart)
-				//Обработка частей Blob с последующим сохранением в mp3
 				for (let _ind = 0; _ind < this.audios.length; _ind++) {
 					const reader_result = await this.audios[_ind].arrayBuffer()
 					const uint8_Array = await new Uint8Array(reader_result)
 					
-					// Ищем все позиции байтов, равных "\r\n"
 					let posIndex = this.findIndex(uint8_Array, this.data_separator)
 					const parts = []
 					if (posIndex !== -1) {
-						// Разрезаем Blob на части
 						const partBlob = this.audios[_ind].slice(posIndex + this.data_separator.length)
 						parts.push(partBlob)
-
 					}
 					
 					if (parts.length > 0 && parts[0] instanceof Blob) {
@@ -110,7 +115,6 @@
 						this.my_uint8Array = await combinedUint8Array
 					}
 				}
-				//console.log(this.audios.length)
 				this.save_mp3()
 			}
 		}
@@ -121,7 +125,7 @@
 	}
 	
 	update_stat(msg) {
-		updateStatusBox(this.indexpart, msg)
+	//	updateStatusBox(this.indexpart, msg)
 	}
 
 	onSocketClose() {
@@ -137,14 +141,10 @@
 					self.start_works()
 				}, 6000)				
 			}
-		} else {
-			//this.update_stat("Сохранена и Закрыта")
 		}
-		add_edge_tts(this.save_to_var)
 	}
 	
 	start_works() {
-		//console.log("Start works...")//console.log(this.my_filename + " " + this.my_filenum + " start works...")
 		if ("WebSocket" in window) {
 			const SEC_MS_GEC_VERSION = "1-130.0.2849.68";
 			const secMsGec = this.generateSecMsGec();
@@ -164,7 +164,6 @@
 		} else {
 			console.log("WebSocket NOT supported by your Browser!");
 		}
-		add_edge_tts(this.save_to_var)
 	}
 
 	mkssml() {
@@ -183,7 +182,6 @@
 		});
 		return uuid.replace(/-/g, '');
 	}
-	
 	
 	sha256(ascii) {
 		function rightRotate(value, amount) {
@@ -281,8 +279,6 @@
 		return this.sha256(strToHash).toUpperCase();
 	}
 	
-	
-	
 	async saveFiles(blob) {
 		if (this.start_save == false) {
 			this.start_save = true
@@ -297,7 +293,6 @@
 	}
 	
 	save_mp3() {
-		//console.log("Save_mp3");
 		if ( this.my_uint8Array.length > 0 ) {
 			this.mp3_saved = true
 			if ( !this.save_to_var ) {				
@@ -320,7 +315,6 @@
 			this.obj_threads_info.count += 1
 			const stat_count = this.obj_threads_info.stat.textContent.split(' / ');
 			this.obj_threads_info.stat.textContent = String(Number(stat_count[0]) + 1) + " / " + stat_count[1]
-			add_edge_tts(this.save_to_var)
 		} else {
 			console.log("Bad Save_mp3");
 		}

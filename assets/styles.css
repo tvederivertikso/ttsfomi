@@ -76,6 +76,13 @@ button {
     border-radius: 10px;
 }
 
+button:disabled {
+    background-color: #2a2a2a;
+    color: #666;
+    cursor: not-allowed;
+    border-color: #333;
+}
+
 rowspace {
     display: flex;
     justify-content: space-between;
@@ -120,45 +127,11 @@ rowspace {
     }
 }
 
-#file-input-lex {
-  display: none;
-}
-
-#file-input {
-  display: none;
-}
-
 #dop-settings-label {
     height: 39px;
     line-height: 39px; 
 	text-align: center;
 	cursor: pointer;
-}
-
-#left-label {
-    padding-bottom: .9rem;
-	text-align: center;
-	width: 48%;
-	display: inline-block;
-}
-
-#right-label {
-    padding-bottom: .9rem;
-	text-align: center;
-	width: 48%;
-	display: inline-block;
-	float: right;
-}
-
-#file-button-lex {
-	width: 48%;
-	display: inline-block;
-}
-
-#file-button {
-	width: 48%;
-	float: right;
-	display: inline-block;
 }
 
 #text-area {
@@ -309,12 +282,6 @@ rowspace {
   background-color: #0b5ed7;
 }
 
-
-
-
-
-
-/* 1. Плавные переходы для интерактивных элементов */
 button, select, textarea, input[type="range"], .ikxBAC {
     transition: 
         background 0.2s, 
@@ -323,7 +290,6 @@ button, select, textarea, input[type="range"], .ikxBAC {
         color 0.2s;
 }
 
-/* 2. Более заметное выделение (фокус) */
 button:focus, button:hover,
 select:focus, select:hover,
 textarea:focus, textarea:hover,
@@ -335,40 +301,33 @@ input[type="range"]:focus, input[type="range"]:hover {
     z-index: 1;
 }
 
-/* Для чекбокса */
 .checkbox-wrapper-2 .ikxBAC:focus {
     box-shadow: 0 0 0 2px #0d6efd55;
     border-color: #0d6efd;
 }
 
-/* 3. Закругление textarea */
 textarea {
     border-radius: 12px !important;
 }
 
-/* 4. Можно чуть увеличить радиус у select и input */
 select, input[type="range"] {
     border-radius: 10px;
 }
 
-/* 5. Для плавности скролла (опционально) */
 html {
     scroll-behavior: smooth;
 }
 
-/* Для всех label, кроме неактивных */
 label {
     transition: color 0.2s, text-shadow 0.2s;
     cursor: pointer;
 }
 
-/* Эффект при наведении */
 label:hover, label:focus {
     color: #fff;
     text-shadow: 0 0 6px #0d6efd88;
 }
 
-/* Для ссылок внутри label */
 label a {
     transition: color 0.2s, text-shadow 0.2s;
     color: #0d6efd;
@@ -381,15 +340,10 @@ label a:hover, label a:focus {
     text-decoration: underline;
 }
 
-/* Для output внутри label (чтобы не мешал эффекту) */
 label output {
     transition: color 0.2s;
 }
 
-
-
-/* Для нового статуса */
-/* === Статусы обработки (цветные квадратики) === */
 .stat-container {
     display: flex;
     flex-direction: row;
@@ -416,7 +370,6 @@ label output {
     box-sizing: border-box;
 }
 
-/* Убираем стандартное выделение */
 .stat-box:focus {
     outline: none;
 }
@@ -425,14 +378,12 @@ label output {
     background: transparent;
 }
 
-/* Цвета для темной темы */
 .stat-opened     { background-color: #444; }
 .stat-started    { background-color: #D97706; }
 .stat-processing { background-color: #B45309; }
 .stat-error      { background-color: #DC2626; }
 .stat-saved      { background-color: #059669; }
 
-/* Подсказка при клике */
 .stat-tooltip {
     position: fixed;
     background-color: #333;
@@ -447,3 +398,83 @@ label output {
     border: 1px solid #555;
 }
 
+/* --- НОВЫЕ СТИЛИ ДЛЯ ОЧЕРЕДИ ФАЙЛОВ --- */
+
+#drop-zone {
+    border: 2px dashed #444;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+    margin-top: 1rem;
+}
+
+#drop-zone:hover, #drop-zone.dragover {
+    background-color: #2a2a2a;
+    border-color: #0d6efd;
+}
+
+#drop-zone p {
+    margin: 0 0 10px 0;
+    pointer-events: none; /* Чтобы текст не мешал перетаскиванию */
+}
+
+#browse-btn {
+    background-color: #333;
+    border: 1px solid #444;
+    color: #fff;
+    padding: 8px 12px;
+}
+
+#queue-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 50px;
+    max-height: 300px;
+    overflow-y: auto;
+    background-color: #2a2a2a;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #444;
+}
+
+.queue-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: #333;
+    border-radius: 5px;
+    border-left: 4px solid #555; /* Изначальный цвет статуса */
+}
+
+.queue-item .file-name {
+    flex-grow: 1;
+    margin-right: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.queue-item .file-status {
+    font-style: italic;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+/* Стили для разных статусов */
+.queue-item.status-queued { border-left-color: #555; }
+.queue-item.status-processing { border-left-color: #D97706; }
+.queue-item.status-completed { border-left-color: #059669; }
+.queue-item.status-error { border-left-color: #DC2626; }
+
+#clear-queue-btn {
+    background-color: #4d3232;
+    border-color: #6b4242;
+}
+#clear-queue-btn:hover {
+    background-color: #6b4242;
+    border-color: #8f5353;
+}

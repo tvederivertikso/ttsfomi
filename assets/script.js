@@ -1,4 +1,7 @@
-﻿const text = document.querySelector('.text')
+﻿// =======================================================================
+// === ОРИГИНАЛЬНЫЕ ПЕРЕМЕННЫЕ И НАСТРОЙКИ (СОХРАНЕНЫ) ===================
+// =======================================================================
+const text = document.querySelector('.text')
 const pitch = document.querySelector('.pitch')
 const pitch_str = document.querySelector('#pitch-str')
 const rate = document.querySelector('.rate')
@@ -13,108 +16,412 @@ const settingsButton = document.querySelector('.settingsbutton')
 const pointsSelect = document.querySelector('.pointsselect')
 const pointsType = document.querySelector('.pointstype')
 const textArea = document.getElementById('text-area')
-const statArea = document.getElementById('stat-area')
 const stat_info = document.querySelector('#stat-info')
 const stat_str = document.querySelector('#stat-str')
-const fileInputLex = document.getElementById('file-input-lex')
 const fileInput = document.getElementById('file-input')
-const fileButtonLex = document.getElementById('file-button-lex')
-const fileButton = document.getElementById('file-button')
 const dopSettings = document.getElementById('dop-settings-label')
 const cbLexxRegister = document.getElementById('lexx_register')
 
-// Функции для работы со статусами
-// === Функции для работы со статусами ===
-const statusNames = {
-    'stat-opened': 'Открыта',
-    'stat-started': 'Запущена',
-    'stat-processing': 'Обработка',
-    'stat-error': 'Ошибка - ПЕРЕЗАПУСК',
-    'stat-saved': 'Сохранена'
-};
+const FIRST_STRINGS_SIZE = 800
+const LAST_STRINGS_SIZE = 4200
+var lexx = []
+var save_path_handle
 
-function getStatusClass(msg) {
-    if (msg === 'Открыта') return 'stat-opened';
-    if (msg === 'Запущена') return 'stat-started';
-    if (msg.includes('Обработка')) return 'stat-processing';
-    if (msg.includes('Ошибка')) return 'stat-error';
-    if (msg === 'Сохранена') return 'stat-saved';
-    return 'stat-opened';
-}
 
-function getStatusText(index, statusClass) {
-    return `Часть ${(index + 1).toString().padStart(4, '0')}: ${statusNames[statusClass] || 'Неизвестно'}`;
-}
+// =======================================================================
+// === НОВЫЙ БЛОК: ЛОГИКА ОЧЕРЕДИ ФАЙЛОВ =================================
+// =======================================================================
 
-function addStatusBox(index, status) {
-    const box = document.createElement('div');
-    const statusClass = getStatusClass(status);
-    box.className = 'stat-box ' + statusClass;
-    box.dataset.index = index;
-    box.dataset.status = statusClass;
-    box.addEventListener('click', showStatusTooltip);
-    statArea.appendChild(box);
-}
+// --- Глобальные переменные для очереди ---
+let fileQueue = []; // Массив для хранения объектов файлов { id, file, status }
+let isQueueProcessing = false; // Флаг, что очередь в процессе обработки
 
-function updateStatusBox(index, status) {
-    const box = statArea.querySelector(`[data-index="${index}"]`);
-    if (box) {
-        const statusClass = getStatusClass(status);
-        box.className = 'stat-box ' + statusClass;
-        box.dataset.status = statusClass;
-    }
-}
+// --- Получаем новые элементы из DOM ---
+const dropZone = document.getElementById('drop-zone');
+const browseBtn = document.getElementById('browse-btn');
+const queueContainer = document.getElementById('queue-container');
+const clearQueueBtn = document.getElementById('clear-queue-btn');
 
-function clearStatusBoxes() {
-    statArea.innerHTML = '';
-}
+// --- Назначаем новые обработчики событий ---
 
-// Всплывающая подсказка при клике
-let activeTooltip = null;
+browseBtn.addEventListener('click', () => fileInput.click());
 
-function showStatusTooltip(e) {
-    const box = e.target;
-    const index = box.dataset.index;
-    
-    // Если подсказка уже открыта для этого квадратика — закрыть
-    if (activeTooltip && activeTooltip.dataset.forIndex === index) {
-        activeTooltip.remove();
-        activeTooltip = null;
-        return;
-    }
-    
-    // Закрыть старую подсказку если есть
-    if (activeTooltip) {
-        activeTooltip.remove();
-    }
-    
-    // Создать новую
-    const tooltip = document.createElement('div');
-    tooltip.className = 'stat-tooltip';
-    tooltip.dataset.forIndex = index;
-    tooltip.textContent = getStatusText(parseInt(index), box.dataset.status);
-    document.body.appendChild(tooltip);
-    
-    // Позиционирование
-    const rect = box.getBoundingClientRect();
-    tooltip.style.left = (rect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
-    tooltip.style.top = (rect.top - tooltip.offsetHeight - 6) + 'px';
-    
-    activeTooltip = tooltip;
-}
-
-// Закрыть при клике вне квадратиков
-document.addEventListener('click', (e) => {
-    if (!e.target.classList.contains('stat-box') && activeTooltip) {
-        activeTooltip.remove();
-        activeTooltip = null;
+dropZone.addEventListener('click', (e) => {
+    if (e.target.id === 'drop-zone' || e.target.tagName === 'P') {
+        fileInput.click();
     }
 });
 
-saveButton.addEventListener('click', e => start())
-dopSettings.addEventListener('click', e => change_dopSettings())
+fileInput.addEventListener('change', (event) => {
+    handleFileSelection(event.target.files);
+    fileInput.value = '';
+});
 
-//save_alloneButton.addEventListener('click', e => start_allone())
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+});
+
+dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('dragover');
+});
+
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    handleFileSelection(e.dataTransfer.files);
+});
+
+clearQueueBtn.addEventListener('click', () => {
+    if (isQueueProcessing) {
+        alert("Нельзя очистить очередь во время обработки.");
+        return;
+    }
+    fileQueue = [];
+    renderQueue();
+});
+
+saveButton.addEventListener('click', () => {
+    if (fileQueue.length > 0 && !isQueueProcessing) {
+        startQueueProcessing();
+    } else if (isQueueProcessing) {
+        alert("Обработка уже запущена.");
+    } else {
+        alert("Очередь пуста. Добавьте файлы для обработки.");
+    }
+});
+
+
+// --- Функции для управления очередью ---
+
+function handleFileSelection(files) {
+    for (const file of files) {
+        if (!fileQueue.some(item => item.file.name === file.name && item.file.size === file.size)) {
+            const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            fileQueue.push({ id: fileId, file: file, status: 'queued' });
+        }
+    }
+    renderQueue();
+}
+
+function renderQueue() {
+    queueContainer.innerHTML = '';
+    if (fileQueue.length === 0) {
+        queueContainer.innerHTML = '<p style="text-align: center; color: #888;">Очередь пуста</p>';
+        return;
+    }
+
+    fileQueue.forEach(item => {
+        const itemDiv = document.createElement('div');
+        itemDiv.id = item.id;
+        itemDiv.className = `queue-item status-${item.status}`;
+        itemDiv.innerHTML = `
+            <span class="file-name" title="${item.file.name}">${item.file.name}</span>
+            <span class="file-status">${item.status}</span>
+        `;
+        queueContainer.appendChild(itemDiv);
+    });
+}
+
+function updateItemStatus(fileId, newStatus, statusText = newStatus) {
+    const itemElement = document.getElementById(fileId);
+    if (itemElement) {
+        itemElement.className = `queue-item status-${newStatus}`;
+        const statusElement = itemElement.querySelector('.file-status');
+        if (statusElement) {
+            statusElement.textContent = statusText;
+        }
+    }
+}
+
+async function startQueueProcessing() {
+    isQueueProcessing = true;
+    saveButton.disabled = true;
+    clearQueueBtn.disabled = true;
+    saveButton.textContent = "Обработка...";
+    stat_info.textContent = ""; // Очищаем старое сообщение
+
+    try {
+        save_path_handle = await window.showDirectoryPicker();
+    } catch (err) {
+        console.log('Пользователь отменил выбор папки.', err);
+        isQueueProcessing = false;
+        saveButton.disabled = false;
+        clearQueueBtn.disabled = false;
+        saveButton.textContent = "Начать обработку и сохранить";
+        return;
+    }
+
+    for (const item of fileQueue) {
+        if (item.status === 'completed' || item.status === 'error') {
+            continue;
+        }
+
+        try {
+            updateItemStatus(item.id, 'processing', 'Обработка...');
+            await processAndSaveSingleFile(item);
+            updateItemStatus(item.id, 'completed', 'Готово');
+        } catch (error) {
+            console.error(`Ошибка при обработке файла ${item.file.name}:`, error);
+            updateItemStatus(item.id, 'error', 'Ошибка');
+        }
+    }
+
+    isQueueProcessing = false;
+    saveButton.disabled = false;
+    clearQueueBtn.disabled = false;
+    saveButton.textContent = "Начать обработку и сохранить";
+    stat_info.textContent = "Очередь завершена!";
+    document.getElementById('progress-container').style.display = 'none';
+}
+
+async function processAndSaveSingleFile(queueItem) {
+    const fileText = await readFileAsText(queueItem.file);
+    const currentBook = new ProcessingFile(
+        queueItem.file.name.slice(0, queueItem.file.name.lastIndexOf(".")),
+        fileText,
+        FIRST_STRINGS_SIZE,
+        LAST_STRINGS_SIZE,
+        lexx,
+        cbLexxRegister.checked,
+        voice.value,
+        rate_str.textContent,
+        String(pitch_str.textContent)
+    );
+
+    if (!currentBook.all_sentences || currentBook.all_sentences.length === 0) {
+        throw new Error("Файл пуст или не удалось извлечь текст.");
+    }
+
+    const numThreads = parseInt(max_threads.value, 10) || 5;
+    const batchSize = parseInt(mergefiles.value, 10) || 10;
+    const sentences = currentBook.all_sentences;
+    const totalParts = sentences.length;
+    let batchCounter = 1;
+    let totalCompleted = 0;
+
+    const progressContainer = document.getElementById('progress-container');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const progressPercentage = document.getElementById('progress-percentage');
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressPercentage.textContent = '0%';
+    progressText.textContent = `Подготовка...`;
+
+    console.log(`Начинаем обработку файла. Всего частей: ${totalParts}. Размер батча: ${batchSize}. Потоков: ${numThreads}.`);
+
+    for (let i = 0; i < totalParts; i += batchSize) {
+        const batch = sentences.slice(i, i + batchSize);
+        const batchStartIndex = i;
+        
+        updateItemStatus(queueItem.id, 'processing', `Обработка батча ${batchCounter}...`);
+        console.log(`Начинаем обработку батча №${batchCounter} (части с ${batchStartIndex + 1} по ${batchStartIndex + batch.length})`);
+
+        const audioPartsForBatch = await new Promise((resolve, reject) => {
+            const batchResults = new Array(batch.length);
+            let running = 0;
+            let completedInBatch = 0;
+            let taskIndex = 0;
+
+            function runNextTask() {
+                if (completedInBatch === batch.length) {
+                    resolve(batchResults);
+                    return;
+                }
+
+                while (running < numThreads && taskIndex < batch.length) {
+                    running++;
+                    const currentTaskIndexInBatch = taskIndex++;
+                    const sentence = batch[currentTaskIndexInBatch];
+                    const absoluteIndex = batchStartIndex + currentTaskIndexInBatch;
+
+                    const taskPromise = new Promise((resolveTask, rejectTask) => {
+                        const socketTTS = new SocketEdgeTTS_for_Queue(
+                            absoluteIndex,
+                            (audioData) => resolveTask(audioData),
+                            (error) => rejectTask(error)
+                        );
+                        socketTTS.start_works(
+                            currentBook.file_names[0][0],
+                            (absoluteIndex + 1).toString().padStart(4, '0'),
+                            "Microsoft Server Speech Text to Speech Voice (" + voice.value + ")",
+                            pitch_str.textContent,
+                            rate_str.textContent,
+                            "+0%",
+                            sentence
+                        );
+                    });
+
+                    taskPromise
+                        .then(audioData => {
+                            batchResults[currentTaskIndexInBatch] = audioData;
+                        })
+                        .catch(error => {
+                            reject(error);
+                        })
+                        .finally(() => {
+                            running--;
+                            completedInBatch++;
+                            totalCompleted++;
+                            
+                            const percentage = ((totalCompleted / totalParts) * 100).toFixed(1);
+                            progressBar.style.width = `${percentage}%`;
+                            progressText.textContent = `Синтез... ${totalCompleted} / ${totalParts}`;
+                            progressPercentage.textContent = `${percentage}%`;
+
+                            runNextTask();
+                        });
+                }
+            }
+            runNextTask();
+        });
+
+        updateItemStatus(queueItem.id, 'processing', `Сохранение батча ${batchCounter}...`);
+        try {
+            let totalLength = 0;
+            audioPartsForBatch.forEach(part => { if(part) totalLength += part.length; });
+
+            if (totalLength === 0) {
+                console.warn(`Батч №${batchCounter} не сгенерировал аудиоданных. Пропускаем сохранение.`);
+                continue;
+            }
+
+            const combinedAudio = new Uint8Array(totalLength);
+            let offset = 0;
+            audioPartsForBatch.forEach(part => {
+                if(part) {
+                    combinedAudio.set(part, offset);
+                    offset += part.length;
+                }
+            });
+
+            const finalBlob = new Blob([combinedAudio.buffer], { type: 'audio/mp3' });
+            
+            const baseFileName = currentBook.file_names[0][0];
+            const sanitizedBaseName = baseFileName.replace(/[\\/:*?"<>|]/g, '_');
+            const finalFileName = `${sanitizedBaseName}_${batchCounter.toString().padStart(4, '0')}.mp3`;
+            
+            console.log(`Попытка сохранить файл батча: "${finalFileName}"`);
+            const fileHandle = await save_path_handle.getFileHandle(finalFileName, { create: true });
+            const writableStream = await fileHandle.createWritable();
+            await writableStream.write(finalBlob);
+            await writableStream.close();
+            console.log(`Файл батча "${finalFileName}" успешно сохранен.`);
+
+        } catch (saveError) {
+            console.error(`!!! ОШИБКА ПРИ СОХРАНЕНИИ БАТЧА №${batchCounter}:`, saveError);
+            throw saveError;
+        }
+
+        batchCounter++;
+    }
+}
+
+function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+            const fileNameLower = file.name.toLowerCase();
+            try {
+                if (fileNameLower.endsWith('.txt') || fileNameLower.endsWith('.ini')) {
+                    resolve(reader.result);
+                } else if (fileNameLower.endsWith('.fb2')) {
+                    resolve(convertFb2ToTxt(reader.result));
+                } else if (fileNameLower.endsWith('.epub')) {
+                    const text = await convertEpubToTxt(file);
+                    resolve(text);
+                } else if (fileNameLower.endsWith('.zip')) {
+                    reject(new Error("ZIP-файлы в режиме очереди пока не поддерживаются."));
+                } else {
+                    reject(new Error("Неподдерживаемый формат файла."));
+                }
+            } catch (e) {
+                reject(e);
+            }
+        };
+        reader.onerror = () => reject(reader.error);
+
+        if (file.name.toLowerCase().endsWith('.epub')) {
+            reader.readAsArrayBuffer(file);
+        } else {
+            reader.readAsText(file);
+        }
+    });
+}
+
+// =======================================================================
+// === КЛАСС С ПОВТОРНЫМИ ПОПЫТКАМИ (RETRY) ==============================
+// =======================================================================
+
+class SocketEdgeTTS_for_Queue extends SocketEdgeTTS {
+    constructor(indexpart, successCallback, errorCallback) {
+        super(indexpart, '', '', '', '', '', '', '', null, null, true, true);
+        
+        this.successCallback = successCallback;
+        this.errorCallback = errorCallback;
+        this.isFinished = false;
+        this.retryCount = 0;
+        this.maxRetries = 20; // Увеличено до 20
+    }
+
+    onSocketClose() {
+        if (this.isFinished) return;
+
+        if (!this.mp3_saved && !this.end_message_received) {
+            if (this.retryCount < this.maxRetries) {
+                this.retryCount++;
+                console.warn(`Socket для части ${this.indexpart} закрылся. Попытка переподключения №${this.retryCount}...`);
+                
+                this.my_uint8Array = new Uint8Array(0);
+                this.audios = [];
+
+                setTimeout(() => {
+                    this.start_works(this.my_filename, this.my_filenum, this.my_voice, this.my_pitch, this.my_rate, this.my_volume, this.my_text);
+                }, 3000);
+
+            } else {
+                this.isFinished = true;
+                const errorMessage = `Socket для части ${this.indexpart} не удалось подключиться после ${this.maxRetries} попыток.`;
+                console.error(errorMessage);
+                this.errorCallback(new Error(errorMessage));
+            }
+        }
+    }
+
+    save_mp3() {
+        if (this.isFinished) return;
+        if (this.my_uint8Array.length > 0) {
+            this.mp3_saved = true;
+            this.isFinished = true;
+            this.successCallback(this.my_uint8Array);
+            this.clear();
+        } else {
+            this.isFinished = true;
+            this.errorCallback(new Error(`No audio data received for part ${this.indexpart}`));
+        }
+    }
+    
+    start_works(filename, filenum, voice, pitch, rate, volume, text) {
+        this.my_filename = filename;
+        this.my_filenum = filenum;
+        this.my_voice = voice;
+        this.my_pitch = pitch;
+        this.my_rate = rate;
+        this.my_volume = volume;
+        this.my_text = text;
+        super.start_works();
+    }
+    
+    saveFiles(blob) { /* Пусто */ }
+}
+
+
+// =======================================================================
+// === ОРИГИНАЛЬНЫЕ ФУНКЦИИ (СОХРАНЕНЫ) ==================================
+// =======================================================================
+
+dopSettings.addEventListener('click', e => change_dopSettings())
 settingsButton.addEventListener('click', e => lite_mod())
 rate.addEventListener('input', e => rate_str.textContent = rate.value >= 0 ? `+${rate.value}%` : `${rate.value}%`)
 pitch.addEventListener('input', e => pitch_str.textContent = pitch.value >= 0 ? `+${pitch.value}Hz` : `${pitch.value}Hz`)
@@ -122,40 +429,11 @@ max_threads.addEventListener('input', e => max_threads_int.textContent = max_thr
 mergefiles.addEventListener('input', e => mergefiles_str.textContent = mergefiles.value == 100 ? "ВСЕ" : `${mergefiles.value} шт.`)
 window.addEventListener('beforeunload', function(event) { save_settings() });
 
-
-stat_info.addEventListener('click', () => {
-	if (textArea.style.display == 'none') {
-		statArea.style.display = (statArea.style.display == 'none') ? 'flex' : 'none';
-	}
-});
-
-const FIRST_STRINGS_SIZE = 800
-const LAST_STRINGS_SIZE = 4200
-var lexx = []
-var book
-var book_loaded = false
-
-var parts_book = []
-var file_name_ind = 0
-var num_book = 0
-var num_text = 0
-var fix_num_book = 0
-var threads_info = { count: parseInt(max_threads.value), stat: stat_str }
-var run_work = false
-var save_path_handle
-
 document.addEventListener("DOMContentLoaded", function(event) {
 	lite_mod()
 	load_settings()
 	set_dopSettings()
-})
-
-fileButtonLex.addEventListener('click', () => {
-	fileInputLex.click();
-})
-
-fileButton.addEventListener('click', () => {
-	fileInput.click();
+    renderQueue();
 })
 
 function change_dopSettings() {
@@ -175,86 +453,15 @@ function set_dopSettings() {
 	document.querySelector('#div-lexx_register').style.display = display_dop
 }
 
-fileInputLex.addEventListener('change', (event) => {
-	lexx = []
-	const file = event.target.files[0]
-	
-	if (file) {
-		const reader = new FileReader()
-		
-		reader.onload = () => {
-			lexx = reader.result.split("\n")
-		}
-		reader.readAsText(file)
-		fileButtonLex.textContent = "Загружен"
-	} else {
-		fileButtonLex.textContent = "Загрузить"
-	}
-})
-
-fileInput.addEventListener('change', (event) => {
-	run_work = false
-	book_loaded = false
-	clearStatusBoxes()
-	
-	if (book) {
-		book.clear()
-		book = null
-	}
-	
-	if (event.target.files.length == 0) {
-		fileButton.textContent = "Открыть"
-		stat_info.textContent = ""//"Открыто"
-	}
-	
-	for (let file of event.target.files) {
-		stat_info.textContent = ""
-		stat_str.textContent = "0 / 0"
-		
-		if (file) {
-			fileButton.textContent = "Обработка..."
-			const reader = new FileReader()
-			reader.onload = () => {
-				book_loaded = true
-				const file_name_toLowerCase = file.name.toLowerCase()
-				
-				if ( file_name_toLowerCase.endsWith('.txt') ) {
-					get_text(file.name.slice(0, file.name.lastIndexOf(".")), reader.result, true, "", "", "")	
-				} else if ( file_name_toLowerCase.endsWith('.ini') ) {
-					get_text(file.name.slice(0, file.name.lastIndexOf(".")), reader.result, true, "", "", "")	
-				} else if ( file_name_toLowerCase.endsWith('.fb2') ) {
-					get_text(file.name.slice(0, file.name.lastIndexOf(".")), convertFb2ToTxt(reader.result), true, "", "", "")	
-				} else if ( file_name_toLowerCase.endsWith('.epub') ) {
-					convertEpubToTxt(file).then(result => get_text(file.name.slice(0, file.name.lastIndexOf(".")), result, true, "", "", ""))
-				} else if ( file_name_toLowerCase.endsWith('.zip') ) {
-					convertZipToTxt(file)
-				}
-				fileButton.textContent = "Открыты"
-			}
-			
-			reader.readAsText(file)
-		} else {
-			fileButton.textContent = "Открыть"
-		}
-	}
-
-})
-
 function lite_mod() {
 	const display_str = (textArea.style.display == 'none') ? 'block' : 'none'
-	const display_stat = (textArea.style.display == 'none') ? 'flex' : 'none'
 	const display_dop = (textArea.style.display == 'none' || dopSettings.textContent == "︿") ? 'block' : 'none';
 	textArea.style.display = display_str;
-	statArea.style.display = display_stat;
 	
 	document.querySelector('#div-pitch').style.display = display_dop
 	document.querySelector('#div-threads').style.display = display_dop
 	document.querySelector('#div-mergefiles').style.display = display_dop
 	document.querySelector('#div-lexx_register').style.display = display_dop
-	
-	if (book && book.all_sentences.length > 0) {
-		textArea.value = ""
-	}
 	
 	if (display_str == 'none') {
 		dopSettings.style.display = 'block'
@@ -262,255 +469,8 @@ function lite_mod() {
 	} else {
 		dopSettings.style.display = 'none'
 		document.querySelector("section").classList.replace("optionslite", "options")
-		
-		if (book && book.all_sentences.length > 0) {
-			let tmp_ind = 0
-			for (let part of book.all_sentences) {
-				tmp_ind += 1
-				textArea.value += "Часть " + tmp_ind + ":\n" + part + "\n\n"
-			}
-		}
-		
 	}
 }
-
-function get_text(_filename, _text, is_file, _voice, _rate, _pitch) {
-	clearStatusBoxes()
-	if ( is_file == true ) {
-		textArea.value = ""
-	}	
-	
-	if (book && is_file) {
-		book.addNewText(_filename, _text, _voice, _rate, _pitch)
-	} else {
-		if (book) {
-			book.clear()
-			book = null
-		}
-		book = new ProcessingFile(
-			_filename,
-			_text,
-			FIRST_STRINGS_SIZE,
-			LAST_STRINGS_SIZE,
-			lexx,
-			cbLexxRegister.checked,
-			_voice,
-			_rate,
-			_pitch
-		)	
-	}
-	
-	let tmp_ind = 0
-	for (let part of book.all_sentences) {
-		tmp_ind += 1
-		if ( is_file == true && textArea.style.display != 'none') {
-			textArea.value += "Часть " + tmp_ind + ":\n" + part + "\n\n"
-		}
-		addStatusBox(tmp_ind - 1, 'Открыта')
-	}
-	stat_info.textContent = ""//"Открыто"
-	stat_str.textContent = `0 / ${book.all_sentences.length}`
-	
-	//Очистка ранее запущенной обработки
-	clear_old_run()
-}
-
-function clear_old_run() {
-	if (parts_book) {
-		for (let part of parts_book) {
-			if (part) part.clear()
-		}
-	}
-	parts_book = []
-	file_name_ind = 0
-	num_book = 0
-	fix_num_book = 0
-	threads_info = { count: parseInt(max_threads.value), stat: stat_str }	
-}
-
-function add_edge_tts(merge) {
-	if (run_work == true) {
-		if (book && num_book < threads_info.count) {
-			let file_name = book.file_names[file_name_ind][0]
-			let file_voice = book.file_names[file_name_ind][2] !== "" ? book.file_names[file_name_ind][2] : voice.value
-			let file_rate = book.file_names[file_name_ind][3] !== "" ? book.file_names[file_name_ind][3] : rate_str.textContent
-			let file_pitch = book.file_names[file_name_ind][4] !== "" ? book.file_names[file_name_ind][4] : String(pitch_str.textContent)
-			let timerId = setTimeout(function tick() {
-				if ( threads_info.count < parseInt(max_threads.value) ) {
-					threads_info.count = parseInt(max_threads.value)
-				}
-				if ( num_book < threads_info.count && num_book < book.all_sentences.length) {
-					if ( book.file_names[file_name_ind][1] > 0 && book.file_names[file_name_ind][1] <= num_book ) {
-						file_name_ind += 1
-						file_name = book.file_names[file_name_ind][0]
-						file_voice = book.file_names[file_name_ind][2] !== "" ? book.file_names[file_name_ind][2] : voice.value
-						file_rate = book.file_names[file_name_ind][3] !== "" ? book.file_names[file_name_ind][3] : rate_str.textContent
-						file_pitch = book.file_names[file_name_ind][4] !== "" ? book.file_names[file_name_ind][4] : String(pitch_str.textContent)
-						fix_num_book = num_book
-					}
-					
-					parts_book.push(
-						new SocketEdgeTTS(
-							num_book,
-							file_name,
-							(num_book+1-fix_num_book).toString().padStart(4, '0'),
-							"Microsoft Server Speech Text to Speech Voice (" + file_voice + ")",
-							file_pitch,
-							file_rate,
-							"+0%",
-							book.all_sentences[num_book],
-							statArea,
-							threads_info,
-							merge
-						)
-					)
-					num_book += 1
-				}
-			}, 100)
-		}
-		if (merge) do_marge()
-	}
-}
-
-function get_audio() {
-	clear_old_run()
-	run_work = true
-	stat_info.textContent = "Обработано"
-	const stat_count = stat_str.textContent.split(' / ');
-	stat_str.textContent = "0 / " + stat_count[1]
-	const merge = (mergefiles.value == 1) ? false : true;
-	
-	if ( !book_loaded )  {
-		num_text += 1
-		get_text("Text " + (num_text).toString().padStart(4, '0'), textArea.value, false, "", "", "")
-	}
-	add_edge_tts(merge)
-}
-
-async function saveFiles(fix_filename, blob, from_ind, to_ind) {
-	const new_folder_handle = await save_path_handle.getDirectoryHandle(parts_book[from_ind].my_filename, { create: true });
-	const fileHandle = await new_folder_handle.getFileHandle(fix_filename, { create: true });
-	const writableStream = await fileHandle.createWritable();
-	const writable = writableStream.getWriter();
-	await writable.write(blob);
-	await writable.close();
-	
-	for (let ind_mp3 = from_ind; ind_mp3 <= to_ind; ind_mp3++) {
-		parts_book[ind_mp3].clear()
-	}
-}
-
-function save_merge(num_mp3, from_ind, to_ind, mp3_length) {
-	if (parts_book[from_ind].start_save == false) {
-		parts_book[from_ind].start_save = true	
-		const combinedUint8Array = new Uint8Array(mp3_length)
-		let pos = 0
-		
-		for (let ind_mp3 = from_ind; ind_mp3 <= to_ind; ind_mp3++) {
-			combinedUint8Array.set(parts_book[ind_mp3].my_uint8Array, pos)
-			pos += parts_book[ind_mp3].my_uint8Array.length
-		}
-		
-		var blob_mp3 = new Blob([combinedUint8Array.buffer])
-		var fix_filename = "file.mp3"
-		if (num_mp3 == 1 && to_ind < parts_book.length-1 && parts_book[to_ind].my_filename != parts_book[to_ind + 1].my_filename) {
-			fix_filename = parts_book[from_ind].my_filename + '.mp3'
-		} else
-		if (mergefiles.value < 100 && mergefiles.value < parts_book.length) {
-			fix_filename = parts_book[from_ind].my_filename + " " + (num_mp3).toString().padStart(4, '0') + '.mp3'
-		} else {
-			fix_filename = parts_book[from_ind].my_filename + '.mp3'
-		}
-		
-		if (save_path_handle ?? false) {
-			saveFiles(fix_filename, blob_mp3, from_ind, to_ind)
-		} else {	
-			const url = window.URL.createObjectURL(blob_mp3)
-			const link = document.createElement('a')
-			link.href = url
-			link.download = fix_filename
-			document.body.appendChild(link)
-			link.click()
-			document.body.removeChild(link)
-			window.URL.revokeObjectURL(url)
-			
-			for (let ind_mp3 = from_ind; ind_mp3 <= to_ind; ind_mp3++) {
-				parts_book[ind_mp3].clear()
-			}
-		}
-	}
-}
-
-function do_marge() {
-	let save_part = false
-	let count_mergefiles = parseInt(mergefiles.value)
-	if (count_mergefiles >= 100) {
-		count_mergefiles = book.all_sentences.length
-	}
-	
-	var books_map = []
-	var sav_ind = true
-	var last_ind = 0
-	var part_mp3_length = 0
-	var count_mp3 = 0
-	var num_mp3 = 1
-	let names_map = book.file_names.map(item => item[1])
-	for (let ind = 0; ind < book.all_sentences.length; ind++) {
-		
-		if (parts_book && ind < parts_book.length && parts_book[ind].mp3_saved == true) {
-			if (sav_ind == true) {
-				part_mp3_length += parts_book[ind].my_uint8Array.length
-			}
-		} else {
-			sav_ind = false
-			part_mp3_length = 0
-		}
-	
-		if (count_mp3 >= count_mergefiles-1 || ind == book.all_sentences.length-1 || names_map.includes(ind+1) ) {
-			books_map.push([sav_ind, last_ind, ind, part_mp3_length, num_mp3])
-			sav_ind = true
-			last_ind = ind+1
-			part_mp3_length = 0
-			count_mp3 = 0
-			if ( names_map.includes(ind+1) ) {
-				num_mp3 = 1
-			} else {
-				num_mp3 += 1				
-			}
-		} else {
-			count_mp3 += 1
-		}
-	}
-
-	if (books_map.length > 0) {
-		for (let book_map of books_map) {
-			if (book_map[0] == true && book_map[3] > 0) {
-				save_merge(book_map[4], book_map[1], book_map[2], book_map[3])
-			}
-		}
-	}
-}
-
-async function selectDirectory() {
-  try {
-    save_path_handle = await window.showDirectoryPicker()
-    const fileHandle = await save_path_handle.getFileHandle('temp.txt', {create: true})
-    const writable = await fileHandle.createWritable()
-    await writable.close()
-    await fileHandle.remove()
-	get_audio()
-  } catch (err) {
-    console.log('err', err);
-	save_path_handle = null
-	get_audio()
-  }
-}
-
-const start = () => {
-	save_settings()
-	selectDirectory()
-}
-
 
 function points_mod() {
 	if (pointsType.innerHTML === "V1") {
@@ -534,13 +494,11 @@ function save_settings() {
 	localStorage.setItem('pitch_str_textContent'      , pitch_str.textContent       )
 	localStorage.setItem('max_threads_int_textContent', max_threads_int.textContent )
 	localStorage.setItem('mergefiles_str_textContent' , mergefiles_str.textContent  )
-	localStorage.setItem('statArea_style_display'     , statArea.style.display      )
 	localStorage.setItem('dopSettings_textContent'    , dopSettings.textContent     )
 	localStorage.setItem('cbLexxRegister_checked'     , cbLexxRegister.checked      )
 }
 
 function load_settings() {
-	console.log(localStorage.getItem('cbLexxRegister_checked'     ))
 	if (localStorage.getItem('pointsSelect_value'         )) { pointsSelect.value          = localStorage.getItem('pointsSelect_value'         ) }
 	if (localStorage.getItem('pointsType_innerHTML'       )) { pointsType.innerHTML        = localStorage.getItem('pointsType_innerHTML'       ) }
 	if (localStorage.getItem('voice_value'                )) { voice.value                 = localStorage.getItem('voice_value'                ) }
@@ -552,8 +510,6 @@ function load_settings() {
 	if (localStorage.getItem('pitch_str_textContent'      )) { pitch_str.textContent       = localStorage.getItem('pitch_str_textContent'      ) }
 	if (localStorage.getItem('max_threads_int_textContent')) { max_threads_int.textContent = localStorage.getItem('max_threads_int_textContent') }
 	if (localStorage.getItem('mergefiles_str_textContent' )) { mergefiles_str.textContent  = localStorage.getItem('mergefiles_str_textContent' ) }
-	if (localStorage.getItem('statArea_style_display'     )) { statArea.style.display      = localStorage.getItem('statArea_style_display'     ) === 'none' ? 'none' : 'flex' }
 	if (localStorage.getItem('dopSettings_textContent'    )) { dopSettings.textContent     = localStorage.getItem('dopSettings_textContent'    ) }
 	if (localStorage.getItem('cbLexxRegister_checked'     )) { cbLexxRegister.checked      = localStorage.getItem('cbLexxRegister_checked'     ) === 'true' }
-	threads_info = { count: parseInt(max_threads.value), stat: stat_str }
 }
