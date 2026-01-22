@@ -141,16 +141,35 @@ async function startQueueProcessing() {
     saveButton.textContent = "Обработка...";
     stat_info.textContent = ""; // Очищаем старое сообщение
 
-    try {
-        save_path_handle = await window.showDirectoryPicker();
-    } catch (err) {
-        console.log('Пользователь отменил выбор папки.', err);
-        isQueueProcessing = false;
-        saveButton.disabled = false;
-        clearQueueBtn.disabled = false;
-        saveButton.textContent = "Начать обработку и сохранить";
-        return;
+    // ...
+try {
+    // Запрашиваем доступ к папке
+    save_path_handle = await window.showDirectoryPicker();
+
+    // === НОВЫЙ КОД: ЗАПРАШИВАЕМ ПОСТОЯННЫЕ РАЗРЕШЕНИЯ ===
+    const options = { mode: 'readwrite' };
+    // Проверяем, есть ли у нас уже права
+    if (await save_path_handle.queryPermission(options) !== 'granted') {
+        // Если прав нет, запрашиваем их
+        if (await save_path_handle.requestPermission(options) !== 'granted') {
+            // Если пользователь отказал, прерываем операцию
+            throw new Error('Необходимы права на запись в папку для сохранения файлов.');
+        }
     }
+    console.log("Права на запись в папку получены.");
+    // =================================================
+
+} catch (err) {
+    console.log('Ошибка при получении доступа к папке:', err.message);
+    isQueueProcessing = false;
+    saveButton.disabled = false;
+    clearQueueBtn.disabled = false;
+    saveButton.textContent = "Начать обработку и сохранить";
+    stat_info.textContent = "Ошибка: " + err.message;
+    return;
+}
+// ...
+
 
     for (const item of fileQueue) {
         if (item.status === 'completed' || item.status === 'error') {
@@ -300,8 +319,8 @@ async function processAndSaveSingleFile(queueItem) {
             
             const baseFileName = currentBook.file_names[0][0];
             const sanitizedBaseName = baseFileName.replace(/[\\/:*?"<>|]/g, '_');
-            const finalFileName = `${sanitizedBaseName}_${batchCounter.toString().padStart(4, '0')}.mp3`;
-            
+            const finalFileName = `${batchCounter.toString().padStart(4, '0')}_${sanitizedBaseName}.mp3`;
+
             console.log(`Попытка сохранить файл батча: "${finalFileName}"`);
             const fileHandle = await save_path_handle.getFileHandle(finalFileName, { create: true });
             const writableStream = await fileHandle.createWritable();
