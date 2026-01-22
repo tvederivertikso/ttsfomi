@@ -317,9 +317,11 @@ async function processAndSaveSingleFile(queueItem) {
 
             const finalBlob = new Blob([combinedAudio.buffer], { type: 'audio/mp3' });
             
+            // ...
             const baseFileName = currentBook.file_names[0][0];
             const sanitizedBaseName = baseFileName.replace(/[\\/:*?"<>|]/g, '_');
-            const finalFileName = `${batchCounter.toString().padStart(4, '0')}_${sanitizedBaseName}.mp3`;
+            const finalFileName = `${batchCounter.toString().padStart(4, '0')}_${sanitizedBaseName}.mp3`; 
+            // ...
 
             console.log(`Попытка сохранить файл батча: "${finalFileName}"`);
             const fileHandle = await save_path_handle.getFileHandle(finalFileName, { create: true });
